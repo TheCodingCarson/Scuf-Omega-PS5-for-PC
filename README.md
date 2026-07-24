@@ -7,7 +7,7 @@ don't recognise as a PlayStation device.
 
 ### Does this describe your problem?
 
-- Your **SCUF Omega in PS5 mode** shows up on PC as a **"generic controller"** or
+- Your **SCUF Omega in PC mode** shows up on PC as a **"generic controller"** or
   gives **Xbox button prompts** instead of PlayStation ones.
 - **DS4Windows / reWASD don't detect** your SCUF as a DualShock 4.
 - You get **double / duplicate controller input** in games.
