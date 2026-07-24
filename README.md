@@ -1,14 +1,26 @@
-# SCUF → DualSense Bridge
+# SCUF → DualSense Bridge — Use a SCUF Omega in PS5 Mode on PC (PlayStation Prompts, Working Touchpad)
 
-Makes a **SCUF controller running in its PlayStation/HID mode** show up to Windows
-and games as a genuine Sony **DualShock 4** — so you get PlayStation button
-prompts, a working touchpad **click**, and the PS button, with no double input.
+**Make a SCUF Omega (Corsair) controller work as a real PlayStation DualShock 4
+on PC** — with PlayStation button prompts, a working touchpad click, and the PS
+button, and no double input. For SCUF pads that DS4Windows, reWASD, and Steam
+don't recognise as a PlayStation device.
+
+### Does this describe your problem?
+
+- Your **SCUF Omega in PS5 mode** shows up on PC as a **"generic controller"** or
+  gives **Xbox button prompts** instead of PlayStation ones.
+- **DS4Windows / reWASD don't detect** your SCUF as a DualShock 4.
+- You get **double / duplicate controller input** in games.
+- Your SCUF's **touchpad click or PS button** don't work on PC.
+
+If so, this bridge fixes it. It reads the pad's raw HID report directly and
+re-presents it under Sony's real VID (`0x054C` / DS4 `0x05C4`) via ViGEm, so
+Windows and games see a genuine DualShock 4.
 
 Built because tools like DS4Windows/reWASD didn't recognise this specific SCUF
-(Corsair VID `0x1B1C`, PID `0x3A27`) as a PlayStation device. Windows and
+(Corsair VID `0x1B1C`, PID `0x3A27`) as a PlayStation device — Windows and
 XInput-native games saw a "generic controller" and ignored it or showed Xbox
-prompts. This reads the pad's raw HID report directly and re-presents it under
-Sony's real VID (`0x054C` / DS4 `0x05C4`) via ViGEm.
+prompts.
 
 > ⚠️ **This is calibrated for one specific SCUF model.** The byte/bit map in
 > `ScufReport.cs` was reverse-engineered for VID `1B1C` / PID `3A27`. A
@@ -291,6 +303,14 @@ visible virtual DS4 to games.
   anti-cheat is never zero-risk. Use on your own account at your own judgement.
 - **One-model calibration**: see the big warning above.
 - **Not affiliated** with SCUF/Corsair, Sony, or Nefarius.
+
+## Keywords
+
+SCUF Omega PC, SCUF Omega PS5 mode on PC, SCUF DualShock 4 emulator, SCUF
+PlayStation prompts Windows, SCUF not detected DS4Windows, SCUF reWASD not
+working, Corsair SCUF VID 1B1C PID 3A27, SCUF generic controller Windows, SCUF
+Xbox prompts fix, SCUF touchpad PS button PC, virtual DualShock 4 ViGEm HidHide,
+SCUF double input fix, SCUF Omega polling rate PC.
 
 ## License
 
