@@ -223,6 +223,39 @@ need remapping. The process:
 > a byte/bit layout map you can copy straight into `ScufReport.cs`. Requires the
 > SCUF in PS5 mode with no remapper app or HidHide hiding it.
 
+## Fixing phantom input at the login screen
+
+If your screen flickers or fields tab through themselves on the Windows **login /
+password screen** — stopping only when you unplug and replug the pad — the raw
+SCUF is sending stray navigation input before anything is hiding it.
+
+Why it happens: if the bridge auto-starts *only after you log on* (the Task
+Scheduler setup above), then at the login screen the bridge isn't running yet, so
+nothing is hiding the physical pad. Windows sees the bare controller and a
+slightly off-center stick or held direction reads as repeated "navigate" input.
+
+Fix it by having **HidHide's own service** hide the physical pad persistently —
+it enforces this at boot, before login, independent of the bridge:
+
+1. Open the **HidHide Configuration Client** (from the Start menu).
+2. On the **Applications** tab, add the bridge exe so it can still read the pad
+   while it's hidden from everything else:
+   `bin\Release\net8.0-windows\win-x64\publish\ScufDualSense.exe`
+3. On the **Devices** tab, **check the physical SCUF** (e.g. *"Corsair SCUF OMEGA
+   WIRELESS CONTROLLER vendor"*, VID_1B1C). **Leave the virtual _"Sony ... Wireless
+   Controller"_ unchecked** — that's the DS4 your games need to see; hiding it
+   would break everything.
+4. Make sure **Enable device hiding** (bottom left) is **checked**.
+5. Unplug/replug the SCUF (the client reminds you: *re-connect for changes to take
+   effect*), then reboot to confirm it persists across a cold boot.
+
+After this, the physical pad is hidden from the moment Windows starts, so it can't
+spam the login screen — while the whitelisted bridge still reads it and feeds the
+visible virtual DS4 to games.
+
+> **Rule of thumb:** hide the **physical** SCUF, keep the **virtual** Sony
+> controller visible — never the other way around.
+
 ## Troubleshooting
 
 - **`GenerateBundle` / "the process cannot access the file ... ScufDualSense.exe
@@ -240,6 +273,12 @@ need remapping. The process:
   virtual DS4. Disable Steam Input for that game (see *Usage in games*).
 - **A control maps wrong (or not at all).** The report layout differs for your
   pad — see *Porting to another SCUF / pad*.
+- **Login screen flickers / tabs by itself until you replug the pad.** The raw
+  SCUF is sending stray input before the bridge starts hiding it — see
+  *Fixing phantom input at the login screen*.
+- **The app crashed with no obvious cause.** Check
+  `%LOCALAPPDATA%\ScufDualSense\scuf.log` for a `[FATAL]` line — it now records
+  the full exception and stack trace instead of dying silently.
 - **Where are the logs?** `%LOCALAPPDATA%\ScufDualSense\scuf.log` (also reachable
   via tray → **Open log folder**). The tray tooltip (hover) and the log's periodic
   throughput line show the delivered poll rate. ~250 Hz is normal — the genuine
