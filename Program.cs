@@ -28,6 +28,21 @@ internal static class Program
         Log("=== ScufDualSense starting ===");
 
         var bridge = new ScufBridge(Log);
+
+        // Global exception handling. Without these, ANY unhandled exception on
+        // any thread silently terminates the process ("crash and die" with no
+        // trace). These log the full stack so crashes can be diagnosed, and keep
+        // the app alive where recovery is possible.
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, e) =>
+            Log($"[FATAL] UI-thread exception (recovered): {e.Exception}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            Log($"[FATAL] Unhandled exception: {e.ExceptionObject}");
+            // Best-effort cleanup so HidHide/ViGEm state is restored on the way out.
+            try { bridge.Stop(); } catch { }
+        };
+
         bridge.Start();
 
         using var tray = new NotifyIcon

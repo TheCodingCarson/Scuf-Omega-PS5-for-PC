@@ -75,6 +75,25 @@ public sealed class ScufBridge : IDisposable
     // ------------------------------------------------------------------
     private void Supervise()
     {
+        // Top-level guard: an exception escaping here would otherwise take down
+        // the whole process. Wrap everything so the worker fails safe, always
+        // runs cleanup, and leaves a trace in the log.
+        try
+        {
+            SuperviseCore();
+        }
+        catch (Exception ex)
+        {
+            _log($"[FATAL] supervisor thread crashed: {ex}");
+        }
+        finally
+        {
+            try { FinalCleanup(); } catch (Exception ex) { _log($"[warn] cleanup after crash failed ({ex.Message})."); }
+        }
+    }
+
+    private void SuperviseCore()
+    {
         try { _client = new ViGEmClient(); }
         catch (Exception ex)
         {
@@ -113,7 +132,8 @@ public sealed class ScufBridge : IDisposable
             if (_running) _log("SCUF gone. Waiting for it to return...");
         }
 
-        FinalCleanup();
+        // Cleanup is handled by the finally in Supervise() so it runs on both
+        // normal exit and crash.
     }
 
     private HidDevice? FindDevice()
@@ -201,12 +221,17 @@ public sealed class ScufBridge : IDisposable
         }
     }
 
+    private bool _cleanedUp;
     private void FinalCleanup()
     {
+        if (_cleanedUp) return;   // idempotent — safe if called from multiple paths
+        _cleanedUp = true;
+
         _log("Shutting down...");
         if (_hidHide is not null)
         {
             foreach (var id in _blocked) { try { _hidHide.RemoveBlockedInstanceId(id); } catch { } }
+            _blocked.Clear();
             if (_exe is not null) { try { _hidHide.RemoveApplicationPath(_exe); } catch { } }
             try { _hidHide.IsActive = false; } catch { }
         }
