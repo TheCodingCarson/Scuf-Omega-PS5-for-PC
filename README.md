@@ -170,10 +170,11 @@ can't elevate):
 ## Higher polling rate (optional, ~250 → 800–900 Hz)
 
 In PS5 mode the SCUF reports at ~250 Hz (a real DualShock 4's USB rate). That's
-fine for most people, but you can raise it with **hidusbf**, a signed kernel USB
-filter (as distributed by Battle Beaver). hidusbf works at the Windows USB
-interrupt-scheduling layer — it doesn't change the device itself — so your bridge
-just inherits the higher rate and **no app changes are needed**. Thanks to
+fine for most people, but you can raise it with **hidusbf**, a kernel USB filter
+originally by **SweetLow / [LordOfMice](https://github.com/LordOfMice/hidusbf)** and
+redistributed by **Battle Beaver** in a signed build. hidusbf works at the Windows
+USB interrupt-scheduling layer — it doesn't change the device itself — so your
+bridge just inherits the higher rate and **no app changes are needed**. Thanks to
 Front_Frame4653 for the driver-variant and stability findings.
 
 **Realistic result:** ~800–900 Hz through the virtual DS4 (mine is stable at
@@ -181,16 +182,50 @@ Front_Frame4653 for the driver-variant and stability findings.
 1000 Hz only exists in the pad's **PC/Xbox mode**, which loses the touchpad, PS
 button, and PlayStation prompts, so this bridge tops out below 1000 by design.
 
+### Download
+
+Get the signed Battle Beaver build from their official guide page:
+
+- **[Battle Beaver — Controller Overclocking guide + download](https://battlebeavercustoms.com/pages/overclocking)**
+
+Battle Beaver EV-signed these kernel drivers and had them attestation-signed by
+Microsoft, so on Windows 11 **you no longer need to disable Secure Boot**. Prefer
+this official page over random mirrors — you're installing a kernel driver.
+
 ### Setup
 
-1. Get the Battle Beaver **hidusbf** package.
-2. In its `DRIVER` folder, run **`2kHz-4kHz.cmd`** first. This swaps in the 4 kHz
-   driver variant — **don't skip it**, the higher refresh rates won't be available
-   otherwise.
-3. Run **`Setup.exe`** → **Install Service** → reboot.
-4. Run `Setup.exe` again → tick **`filter on device`** for the SCUF → set
-   **RefreshRate = 62** → click **Restart**.
-5. Reconnect the pad (or reboot) and confirm the new rate with a tester (below).
+1. **Turn off Memory Integrity** (Windows 11). Search Start for *Core isolation*
+   and set **Memory Integrity** to **Off**, then reboot. The driver won't load
+   otherwise. This is a real security tradeoff — see *Caveats*.
+2. **Extract the zip to a permanent folder** (not a temp dir — the service
+   references this path).
+3. **Install the 4 kHz driver variant.** Open the extracted **`DRIVER`** folder,
+   right-click **`2kHz-4kHz.cmd`** → **Run as administrator**. This swaps in the
+   driver variant that exposes rates above 1000 Hz — **don't skip it**, the higher
+   refresh rates won't be selectable otherwise. (The package also ships
+   `1kHz.cmd` if you ever want to drop back to the standard 1 kHz driver.)
+4. **Run `Setup.exe`** from that same `DRIVER` folder — right-click →
+   **Run as administrator**. An "unknown publisher" prompt is normal.
+5. **Find the SCUF.** With the pad plugged in and in PS5 mode, set the **Devices**
+   dropdown (top-left) to **All**. The *Device Name* column is unhelpful with many
+   USB devices — look in the **Child Name(s)** column for **"Wireless
+   Controller"** instead. Click that row to select it.
+6. **Apply the filter.** Tick **`Filter on Device`** (bottom-left), pick your rate
+   in the **Selected Rate** dropdown, then click **Install Service**.
+   > On my setup the value that worked best was **RefreshRate 62** (see below).
+   > Battle Beaver's own guide uses the plain `1000` entry — try both, the
+   > available options depend on which driver variant you installed in step 3.
+7. **Click `Restart`** to re-enumerate the pad (sometimes you must physically
+   unplug/replug instead).
+8. **Verify.** The **Filter** column should read **Yes** and the **Rate** column
+   should match what you selected. Unplug/replug and confirm it sticks. For a final
+   check, set the **Devices** dropdown to **with HIDUSBF** — your pad should appear
+   there.
+
+> **If the device is highlighted red**, the flash failed. The common Windows 11 fix
+> is to right-click **`HIDUSBF_AS`** → **Install**, then re-run the `.cmd` from
+> step 3 as administrator. Otherwise see the
+> [hidusbf troubleshooting wiki](https://github.com/LordOfMice/hidusbf/wiki).
 
 ### The two things that actually matter
 
@@ -201,18 +236,28 @@ button, and PlayStation prompts, so this bridge tops out below 1000 by design.
 - **RefreshRate 62 beat 31 for me** (~750 → 870 Hz). Try both and keep whichever
   reads higher *and* stable — some setups do better on 31.
 
-Measure with a polling tester (e.g. Gamepadla) pointed at the virtual **"Wireless
-Controller"** — that's what the game actually sees. The tray tooltip also shows a
-rate, but it reads a little low (it counts reports drained from the Windows HID
-buffer, which coalesces), so trust the tester.
+Measure with a polling tester —
+**[Gamepadla](https://github.com/cakama3a/Gamepadla/releases/)** is what Battle
+Beaver use — pointed at the virtual **"Wireless Controller"**, since that's what
+the game actually sees. The tray tooltip also shows a rate, but it reads a little
+low (it counts reports drained from the Windows HID buffer, which coalesces), so
+trust the tester.
 
 ### Caveats
 
-hidusbf is a kernel driver and requires USB 3.x with the Microsoft USB 3.x stack
-(Windows 8/10/11). Some setups may require disabling **Memory Integrity** (Core
-Isolation) for the filter to load — that's a real security tradeoff, so it's your
-call. This also adds another driver to the stack near anti-cheat (hidusbf + ViGEm
-+ HidHide); widely used, but never zero-risk. Use at your own judgement.
+hidusbf is a **kernel driver** and requires USB 3.x with the Microsoft USB 3.x
+stack (Windows 8/10/11). Two things to weigh:
+
+- **Memory Integrity (Core Isolation) must be off** on Windows 11 for the driver to
+  load. That's a genuine security tradeoff — it disables a hypervisor-backed
+  protection against malicious drivers. Your call whether the input latency is
+  worth it; you can turn it back on (and lose the overclock) at any time.
+- **Anti-cheat**: this stacks another kernel driver alongside ViGEm and HidHide.
+  Widely used in the competitive-controller scene, but never zero-risk.
+
+On the plus side, the current Battle Beaver build is EV-signed and Microsoft
+attestation-signed, so **disabling Secure Boot is no longer required** the way it
+was with older unsigned hidusbf releases.
 
 ## Porting to another SCUF / pad
 
