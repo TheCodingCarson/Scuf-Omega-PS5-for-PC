@@ -33,6 +33,33 @@ public sealed class ScufBridge : IDisposable
     // Analog value above which we also assert the digital L2/R2 button bit.
     private const byte TriggerDigitalThreshold = 12;
 
+    // --- motion ---------------------------------------------------------
+    // Forward gyro + accelerometer by submitting the DS4 *extended* report
+    // instead of the 9-byte basic one. Requires ViGEmBus 1.17.333 or newer; the
+    // bridge detects an older bus and falls back to the basic path by itself.
+    private static readonly bool EnableGyro = true;
+
+    // Touchpad X/Y rides in the same extended report, so it costs nothing to
+    // forward once we're already in raw mode. RescaleY rather than Raw because
+    // this pad's surface is DualSense-height — Y runs 0..1079, while a game
+    // reading a DS4 expects 0..941, so passing it through untouched would drop
+    // the bottom eighth of the pad off the edge.
+    private static readonly TouchMode TouchSurfaceMode = TouchMode.RescaleY;
+
+    // Subtract the gyro's resting offset so a pad left on the desk doesn't
+    // drift the camera. Turn off if a game does its own calibration.
+    private static readonly bool EnableGyroBiasCorrection = true;
+
+    // Diagnostics for porting to a different pad. Each logs a one-shot summary
+    // a few seconds after connect and then goes quiet. Leave both false in
+    // normal use — see "Porting to another SCUF / pad" in the README.
+    //   MotionProbe — range covered by each of the six motion axes, which tells
+    //                 you whether the pad has sensors at all.
+    //   TouchProbe  — which report bytes move while a finger drags, plus the
+    //                 X/Y extent decoded from Ds4Raw.IN_TOUCH.
+    private static readonly bool LogMotionProbe = false;
+    private static readonly bool LogTouchProbe = false;
+
     private static readonly Guid HidInterface = new("4D1E55B2-F16F-11CF-88CB-001111000030");
 
     private readonly Action<string> _log;
@@ -176,7 +203,41 @@ public sealed class ScufBridge : IDisposable
             ds4 = _client!.CreateDualShock4Controller();
             ds4.AutoSubmitReport = false;
             ds4.Connect();
-            _log($"Connected. Virtual DS4 online ({len}-byte reports).");
+
+            // The basic DS4 report ViGEm builds from SetButtonState/SetAxisValue
+            // has no motion fields at all. Gyro, accel, the sensor timestamp and
+            // touch coordinates only exist in the 63-byte extended report, which
+            // we have to assemble ourselves and push with SubmitRawReport.
+            bool raw = EnableGyro && len >= Ds4Raw.MotionMinLength;
+            var raw63 = new byte[Ds4Raw.ExLength];
+            var bias = EnableGyroBiasCorrection ? new GyroBias() : null;
+            var probe = LogMotionProbe ? new MotionProbe() : null;
+            var touchProbe = LogTouchProbe ? new TouchProbe() : null;
+
+            if (raw)
+            {
+                try
+                {
+                    Ds4Raw.BuildNeutral(raw63);
+                    ds4.SubmitRawReport(raw63);
+                }
+                catch (Exception rex)
+                {
+                    raw = false;
+                    _log($"[warn] extended DS4 reports rejected ({rex.Message}). " +
+                          "Motion disabled — update ViGEmBus to 1.17.333 or newer.");
+                }
+            }
+            else if (EnableGyro)
+            {
+                _log($"[warn] pad reports only {len} bytes; no motion data present.");
+            }
+
+            bool touchOn = raw && TouchSurfaceMode != TouchMode.Off
+                               && len >= Ds4Raw.TouchMinLength;
+            _log($"Connected. Virtual DS4 online ({len}-byte reports, " +
+                 $"motion {(raw ? "on" : "off")}, " +
+                 $"touch surface {(touchOn ? TouchSurfaceMode.ToString() : "off")}).");
 
             var buf = new byte[len];
             long windowStart = Environment.TickCount64;
@@ -190,8 +251,23 @@ public sealed class ScufBridge : IDisposable
                 catch { break; } // device removed
                 if (n < ScufReport.MinLength) continue;
 
-                ScufState s = ScufReport.Parse(buf);
-                Apply(in s, ds4);
+                if (raw)
+                {
+                    probe?.Feed(buf, n, _log);
+                    touchProbe?.Feed(buf, n, _log);
+                    Ds4Raw.Build(buf, n, raw63, TriggerDigitalThreshold, bias, TouchSurfaceMode);
+                    try { ds4.SubmitRawReport(raw63); }
+                    catch (Exception rex)
+                    {
+                        raw = false;
+                        _log($"[warn] raw submit failed ({rex.Message}); reverting to basic reports.");
+                    }
+                }
+                else
+                {
+                    ScufState s = ScufReport.Parse(buf);
+                    Apply(in s, ds4);
+                }
 
                 // Throughput: reports forwarded per second. The SCUF streams
                 // continuously (gyro never rests), so this reflects the actual
@@ -240,7 +316,9 @@ public sealed class ScufBridge : IDisposable
     }
 
     // ------------------------------------------------------------------
-    //  Mapping (SCUF DS4-format -> ViGEm DS4). Direct field copy.
+    //  Fallback mapping (SCUF -> ViGEm's basic 9-byte DS4 report). Used only
+    //  when the bus rejects extended reports: buttons and axes survive, motion
+    //  and touch coordinates do not, because that report has no fields for them.
     // ------------------------------------------------------------------
     private static void Apply(in ScufState s, IDualShock4Controller ds4)
     {

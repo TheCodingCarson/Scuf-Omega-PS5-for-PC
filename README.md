@@ -1,9 +1,10 @@
-# SCUF → DualSense Bridge — Use a SCUF Omega in PS5 Mode on PC (PlayStation Prompts, Working Touchpad)
+# SCUF → DualSense Bridge — Use a SCUF Omega in PS5 Mode on PC (PlayStation Prompts, Gyro, Full Touchpad)
 
 **Make a SCUF Omega (Corsair) controller work as a real PlayStation DualShock 4
-on PC** — with PlayStation button prompts, a working touchpad click, and the PS
-button, and no double input. For SCUF pads that DS4Windows, reWASD, and Steam
-don't recognise as a PlayStation device.
+on PC** — with PlayStation button prompts, **gyro/motion**, a **fully working
+touchpad** (click *and* two-finger surface tracking), the PS button, and no
+double input. For SCUF pads that DS4Windows, reWASD, and Steam don't recognise
+as a PlayStation device.
 
 ### Does this describe your problem?
 
@@ -11,7 +12,8 @@ don't recognise as a PlayStation device.
   gives **Xbox button prompts** instead of PlayStation ones.
 - **DS4Windows / reWASD don't detect** your SCUF as a DualShock 4.
 - You get **double / duplicate controller input** in games.
-- Your SCUF's **touchpad click or PS button** don't work on PC.
+- Your SCUF's **touchpad or PS button** don't work on PC.
+- You want **gyro aiming** from a SCUF on PC and nothing exposes the motion data.
 
 If so, this bridge fixes it. It reads the pad's raw HID report directly and
 re-presents it under Sony's real VID (`0x054C` / DS4 `0x05C4`) via ViGEm, so
@@ -22,9 +24,10 @@ Built because tools like DS4Windows/reWASD didn't recognise this specific SCUF
 XInput-native games saw a "generic controller" and ignored it or showed Xbox
 prompts.
 
-> ⚠️ **This is calibrated for one specific SCUF model.** The byte/bit map in
-> `ScufReport.cs` was reverse-engineered for VID `1B1C` / PID `3A27`. A
-> different SCUF (or firmware) may use a different PID and/or report layout. See
+> ⚠️ **This is calibrated for one specific SCUF model.** The byte/bit maps in
+> `ScufReport.cs` (buttons and sticks) and `Ds4Raw.cs` (motion and touch) were
+> reverse-engineered for VID `1B1C` / PID `3A27`. A different SCUF (or firmware)
+> may use a different PID and/or report layout. See
 > "Porting to another SCUF / pad" below for how to remap it.
 
 ## Quick start
@@ -34,7 +37,8 @@ Follow these steps in order. Each links to the detailed section further down.
 1. **Install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).**
    Needed to build the app.
 2. **Install the [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases) driver**
-   (creates the virtual DS4), then reboot.
+   (creates the virtual DS4), then reboot. Use **1.17.333 or newer** — gyro and
+   touchpad tracking need it.
 3. **Install the [HidHide](https://github.com/nefarius/HidHide/releases) driver**
    (hides the physical pad), then reboot.
 4. **Confirm your controller matches.** Put the SCUF in **PS5 mode**, open Device
@@ -58,12 +62,37 @@ Follow these steps in order. Each links to the detailed section further down.
 ## What works
 
 Sticks, triggers, all face/shoulder/menu buttons, D-pad, L3/R3, **PS button**,
-and **touchpad click**. Everything the game needs for PlayStation prompts.
+and **touchpad click** - everything the game needs for PlayStation prompts.
 
-**Not** implemented: touchpad *surface* dragging (the 12-bit X/Y coordinates),
-gyro/motion, adaptive triggers, and haptics. The touch coordinates exist in the
-report (bytes 33–35) but pushing them through requires ViGEm raw extended
-reports; PRs welcome. The Omega has no adaptive triggers/haptics anyway.
+Also forwarded, via the DS4 **extended** report:
+
+- **Gyro and accelerometer.** All six axes at full rate, with the sensor
+  timestamp converted to DS4 units so games that integrate gyro against the
+  timestamp delta get the correct angular rate. A resting-offset correction runs
+  continuously so a pad left on the desk doesn't drift the camera.
+- **Touchpad surface tracking.** Both fingers, full 1920 × 942 range, with the
+  pad's taller native Y range rescaled to what a DS4 reports.
+
+**Not** implemented: adaptive triggers and haptics - the Omega has neither, since
+Sony's licensing terms exclude both for third-party controllers, and Scuf removed
+the vibration motors entirely.
+
+> **Requires ViGEmBus 1.17.333 or newer** for motion and touch coordinates. On an
+> older bus the app logs a warning and falls back to buttons and axes only;
+> everything else still works.
+
+### How the motion and touch data gets through
+
+ViGEm's ordinary `SetButtonState`/`SetAxisValue` path builds a 9-byte
+`DS4_REPORT`, which has no fields for motion or touch coordinates at all. Those
+only exist in the 63-byte `DS4_REPORT_EX`, so `Ds4Raw.cs` assembles that report
+by hand and submits it with `SubmitRawReport`.
+
+On the input side this pad's report is DualSense-format, and for the motion block
+the two are byte-identical - same order, same units, same signs — so gyro and
+accel are a straight 12-byte copy with no scaling or sign flips. The touch block
+is the one place the pad deviates: its two fingers sit at bytes **32–39**, one
+byte earlier than a real DualSense puts them.
 
 ## Requirements
 
@@ -71,7 +100,9 @@ reports; PRs welcome. The Omega has no adaptive triggers/haptics anyway.
 - **[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)** — needed to build
   from source. (If you use a self-contained published exe as described in
   *Auto-start* below, end users don't need .NET installed.)
-- **[ViGEmBus](https://github.com/nefarius/ViGEmBus/releases)** driver (creates the virtual DS4)
+- **[ViGEmBus](https://github.com/nefarius/ViGEmBus/releases)** driver (creates the virtual DS4).
+  **1.17.333 or newer** — older builds reject the extended report, which costs you
+  gyro and touchpad tracking but leaves buttons and axes working.
 - **[HidHide](https://github.com/nefarius/HidHide/releases)** driver (hides the physical pad; optional — see `EnableHidHide` in `ScufBridge.cs`)
 - Admin rights — the app auto-elevates via its manifest (HidHide and ViGEm both require it)
 
@@ -269,16 +300,37 @@ need remapping. The process:
    `PID_xxxx` values.
 2. **Update the identifiers.** Set `Vid`, `Pid`, and `DeviceFragment` in
    `ScufBridge.cs`, and confirm the VID/PID references in `ScufReport.cs`.
-3. **Map the report bytes.** Determine which report byte/bit each control uses,
-   then update the offset and mask constants at the top of `ScufReport.cs`
+3. **Map the buttons and sticks.** Determine which report byte/bit each control
+   uses, then update the offset and mask constants at the top of `ScufReport.cs`
    (`LX`, `L2_ANALOG`, `M_CROSS`, etc.). You can inspect the raw report bytes by
    temporarily logging the buffer in `RunOneCycle` in `ScufBridge.cs` and
    watching how bytes change as you press each control.
+4. **Map the motion and touch blocks.** These live in `Ds4Raw.cs`, not
+   `ScufReport.cs`: `IN_MOTION` (gyro, then accel — twelve bytes total),
+   `IN_SENSOR_TS`, and `IN_TOUCH`. Two built-in probes find them for you - set
+   `LogMotionProbe` / `LogTouchProbe` to `true` in `ScufBridge.cs`, run, and read
+   `%LOCALAPPDATA%\ScufDualSense\scuf.log`:
+   - **MotionProbe** logs the range each of the six motion axes covered while you
+     rotate the pad. Every axis flat means the pad has no sensors and no amount
+     of plumbing will produce gyro.
+   - **TouchProbe** logs which report bytes moved while you dragged a finger,
+     plus the X/Y extent decoded from the current `IN_TOUCH`. If the decoded
+     coordinates never vary but other bytes did move, point `IN_TOUCH` at the
+     first byte that moved — that's the finger's tracking byte.
 
-> A **calibration wizard** is included in [`tools/`](tools/) to speed this up: run
-> it (`dotnet run` from `tools/`), press each control when prompted, and it prints
-> a byte/bit layout map you can copy straight into `ScufReport.cs`. Requires the
-> SCUF in PS5 mode with no remapper app or HidHide hiding it.
+   If the probe reports a Y maximum above ~942, set `TouchSurfaceMode` to
+   `TouchMode.RescaleY`; if it fits inside the DS4 range, `TouchMode.Raw` is
+   correct. `TouchMode.Off` disables surface tracking and keeps click only.
+
+> A **calibration wizard** is included in [`tools/`](tools/) to speed up step 3:
+> run it (`dotnet run` from `tools/`), press each control when prompted, and it
+> prints a byte/bit layout map you can copy straight into `ScufReport.cs`.
+> Requires the SCUF in PS5 mode with no remapper app or HidHide hiding it.
+
+> **A caution learned the hard way.** This pad's report is DualSense-format for
+> sticks, buttons, triggers and the entire motion block - but *not* for touch,
+> where the fingers sit one byte earlier than the DualSense spec says. Matching
+> in one region is not evidence for another. Dump the bytes and confirm.
 
 ## Fixing phantom input at the login screen
 
@@ -330,6 +382,23 @@ visible virtual DS4 to games.
   virtual DS4. Disable Steam Input for that game (see *Usage in games*).
 - **A control maps wrong (or not at all).** The report layout differs for your
   pad — see *Porting to another SCUF / pad*.
+- **`[warn] extended DS4 reports rejected`** in the log, and no gyro or touchpad
+  tracking. Your ViGEmBus predates the extended-report call. Update to
+  **1.17.333 or newer** and reboot. Buttons and axes keep working meanwhile.
+- **No gyro in the game, but the log says motion is on.** The bridge's job ends
+  at the virtual pad; something has to read the motion from it. See
+  *Gyro: which layer actually reads it* - most likely you need Steam Input
+  **enabled** for that title rather than disabled.
+- **The camera drifts slowly on its own.** The resting-offset correction only
+  re-learns while the pad is genuinely still, so leave it untouched on a flat
+  surface for a second. If it persists, set `EnableGyroBiasCorrection = false` in
+  `ScufBridge.cs` and let the game do its own calibration instead.
+- **Touchpad pointer stuck in a corner, or not following your finger.** The touch
+  block is at the wrong offset for your pad. Set `LogTouchProbe = true` and
+  follow *Porting to another SCUF / pad* — or set
+  `TouchSurfaceMode = TouchMode.Off` to fall back to click-only, which is
+  strictly better than a stuck contact, since a phantom touch can block menu
+  input in some games.
 - **Login screen flickers / tabs by itself until you replug the pad.** The raw
   SCUF is sending stray input before the bridge starts hiding it — see
   *Fixing phantom input at the login screen*.
@@ -347,6 +416,12 @@ visible virtual DS4 to games.
   tolerated, but injecting virtual input + hiding devices near kernel
   anti-cheat is never zero-risk. Use on your own account at your own judgement.
 - **One-model calibration**: see the big warning above.
+- **Gyro calibration is approximated.** A DualSense reports uncalibrated sensor
+  values and expects the host to apply the factory calibration from feature
+  report `0x05`. This bridge doesn't read that; it learns the resting offset at
+  runtime instead, which removes drift but doesn't correct per-axis scale. Good
+  enough for aiming; not a substitute for the real calibration data if you need
+  absolute angular accuracy.
 - **Not affiliated** with SCUF/Corsair, Sony, or Nefarius.
 
 ## Keywords
@@ -355,7 +430,9 @@ SCUF Omega PC, SCUF Omega PS5 mode on PC, SCUF DualShock 4 emulator, SCUF
 PlayStation prompts Windows, SCUF not detected DS4Windows, SCUF reWASD not
 working, Corsair SCUF VID 1B1C PID 3A27, SCUF generic controller Windows, SCUF
 Xbox prompts fix, SCUF touchpad PS button PC, virtual DualShock 4 ViGEm HidHide,
-SCUF double input fix, SCUF Omega polling rate PC.
+SCUF double input fix, SCUF Omega polling rate PC, SCUF Omega gyro PC, SCUF gyro
+aiming Windows, SCUF motion controls DS4, SCUF Omega touchpad tracking, DS4
+extended report gyro ViGEm, DS4_REPORT_EX SubmitRawReport motion.
 
 ## License
 
